@@ -15,14 +15,19 @@ addEventListener('unhandledrejection', e => fail('エラー: ' + ((e.reason && e
 // ---------- 画面の準備(iPad向けに軽く) ----------
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 const maxPR = Math.min(devicePixelRatio, 1.25); let pr = maxPR; // 解像度。重いと自動で下げる
-renderer.setPixelRatio(pr); renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(pr);
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.9;
+Object.assign(renderer.domElement.style, { width: '100%', height: '100%' }); // 画面いっぱいに広げる(大きさはCSS任せ)
 document.body.prepend(renderer.domElement);
 const scene = new THREE.Scene(); scene.fog = new THREE.Fog(0xcfe3f3, 300, 2200);
-const cam = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.4, 4000);
+const cam = new THREE.PerspectiveCamera(62, 1, 0.4, 4000);
 scene.add(new THREE.HemisphereLight(0xcfe3ff, 0x55633d, 1.2));
 const sun = new THREE.DirectionalLight(0xfff2dd, 2.4); sun.position.set(-300, 400, 200); scene.add(sun);
-addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); });
+const fit = () => { // 描画サイズを、実際に表示されている大きさに合わせる(拡大・縮小・回転しても崩れない)
+  const c = renderer.domElement, w = c.clientWidth || 1, h = c.clientHeight || 1;
+  renderer.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix();
+};
+fit(); new ResizeObserver(fit).observe(renderer.domElement);
 
 // 空(グラデーションの球)
 const skyG = new THREE.SphereGeometry(2500, 16, 10), pa = skyG.attributes.position, cols = [];
