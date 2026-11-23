@@ -178,7 +178,7 @@ function physics(dt) {
 const ang = [0, 0, 0, 0];
 function showCar(dt) {
   carObj.position.set(car.x, 0, car.z);
-  carObj.rotation.set(clamp(-car.axf * 0.0035, -0.05, 0.05), car.yaw, clamp(car.ayf * 0.004, -0.06, 0.06), 'YXZ'); // 加減速・コーナーで車体が傾く
+  carObj.rotation.set(clamp(-car.axf * 0.0009, -0.02, 0.02), car.yaw, clamp(car.ayf * 0.0008, -0.015, 0.015), 'YXZ'); // GT3は足が硬いので、車体の傾きはわずか(最大約1度)
   shadow.position.x = car.x; shadow.position.z = car.z; shadow.rotation.y = car.yaw;
   wheels.forEach((w, i) => {
     ang[i] = (ang[i] + car.w[i] * dt) % (Math.PI * 2); w.spin.rotation.x = ang[i];
