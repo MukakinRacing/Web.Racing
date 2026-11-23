@@ -1,12 +1,12 @@
 // physics.js — 車の動き(物理計算)とコースの判定。three.jsを使わない「計算だけ」のファイル
 const G = 9.81;
-export const CAR = { m: 1300, L: 2.78, wf: 0.44, h: 0.45, tf: 1.66, tr: 1.62, R: 0.34, Iw: 2.0, Iz: 1900, Ie: 0.2 };
+export const CAR = { m: 1300, L: 2.78, wf: 0.44, h: 0.42, tf: 1.66, tr: 1.62, R: 0.34, Iw: 2.0, Iz: 1900, Ie: 0.2 };
 CAR.b = CAR.wf * CAR.L; // 重心→後輪の距離
 CAR.a = CAR.L - CAR.b;  // 重心→前輪の距離
 const GEAR = [0, 13.0, 9.4, 7.3, 5.9, 4.8, 4.0]; // 総減速比(1〜6速)
 const TQ = [[1000, .5], [3000, .8], [5000, .95], [6500, 1], [8000, .98], [9000, .88], [9400, .5]]; // エンジントルク(回転数, 相対値)
 const TMAX = 470;                  // 最大トルク[Nm]
-const BRK = [3000, 3000, 1700, 1700]; // ブレーキ最大トルク(左前,右前,左後,右後)
+const BRK = [3200, 3200, 1500, 1500]; // ブレーキ最大トルク(左前,右前,左後,右後)。前寄りの配分
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 function torque(rpm) {
   for (let i = 1; i < TQ.length; i++) {
@@ -26,10 +26,11 @@ export class Car {
     const { m, a, b, L, h, R, Iw, Iz, Ie } = CAR, s = Math.sin(this.yaw), c = Math.cos(this.yaw);
     const sp = Math.hypot(this.vx, this.vy);
     this.thr += (inp.thr - this.thr) * Math.min(1, dt * 8);
-    this.brk += (inp.brk - this.brk) * Math.min(1, dt * 10);
+    this.brk += (inp.brk - this.brk) * Math.min(1, dt * (inp.brk > this.brk ? 5 : 12)); // 踏む時はじわっと、離す時は素早く
     this.steer = inp.steer * 0.52 / (1 + (sp / 12) ** 2); // 速度が上がるほど舵角は小さく
     const brk = (inp.thr < 0.02 && Math.abs(this.vx) < 1) ? Math.max(this.brk, 0.2) : this.brk; // 停止中は自動でブレーキ保持
 
+    const lat = Math.min(1, Math.abs(this.ayf) / 14.7); // 横Gの大きさ(1.5Gで1)
     // --- エンジンと6速オートマ ---
     this.shift -= dt;
     const ratio = GEAR[this.gear], wd = (this.w[2] + this.w[3]) / 2;
@@ -43,15 +44,15 @@ export class Car {
     let thr = this.thr;
     const sl = Math.max(this.slip[2], this.slip[3]);
     if (this.tc && sl > 0.12) thr *= clamp(1 - (sl - 0.12) * 8, 0.1, 1); // トラクションコントロール
-    let Te = torque(rpm) * TMAX * thr - (1 - thr) * TMAX * 0.1 * rpm / 9000; // エンジンブレーキ込み
+    let Te = torque(rpm) * TMAX * thr - (1 - thr) * TMAX * 0.07 * (1 - 0.6 * lat) * rpm / 9000; // エンジンブレーキ(コーナー中は弱めてリフトオフスピンを防ぐ)
     if ((rpm > 9000 && Te > 0) || this.shift > 0) Te = 0;                    // レブリミッター/変速中
     const Tw = Te * ratio * 0.92;
     const dc = clamp(20 * (this.w[2] - this.w[3]), -0.3 * Math.abs(Tw) - 150, 0.3 * Math.abs(Tw) + 150); // LSD
     const Td = [0, 0, Tw / 2 - dc, Tw / 2 + dc]; // 後輪駆動(RWD)
 
     // --- 4輪の接地荷重(ダウンフォースと荷重移動) ---
-    const down = 0.5 * 1.2 * 1.8 * this.vx * Math.abs(this.vx);
-    const lt = m * this.axf * h / L;                                   // 前後の荷重移動
+    const down = 0.5 * 1.2 * 2.3 * this.vx * Math.abs(this.vx);
+    const lt = 0.6 * m * this.axf * h / L;                             // 前後の荷重移動(GT3は足が硬くアンチダイブも効くので控えめ)
     const tfs = 0.5 * m * this.ayf * h / CAR.tf, trs = 0.5 * m * this.ayf * h / CAR.tr; // 左右の荷重移動
     const Ff = m * G * b / L / 2 + down * 0.21 - lt / 2, Fr = m * G * a / L / 2 + down * 0.29 + lt / 2;
     const Fz = [Ff - tfs, Ff + tfs, Fr - trs, Fr + trs].map(v => Math.max(v, 100));
@@ -71,13 +72,15 @@ export class Car {
       const F = Fz[i] * mu * Math.sin(1.5 * Math.atan(1.732 * ss));        // 摩擦円(前後と横の合成)
       const fxs = F * sx / ss;
       const rr = Fz[i] * (g < 0.9 ? 0.07 : 0.015) * Math.tanh(vl * 2);    // 転がり抵抗(芝は大きい)
-      const fxt = fxs - rr, fyt = -F * sy / ss;
+      const fxt = fxs - rr, fyt = -F * sy / ss * (i > 1 ? 1 + 0.35 * this.brk : 1); // 制動中は後輪の横グリップを強め、アンダー寄り・スピンしにくく
       this.slip[i] = kap;
       // ホイールの回転(安定のため陰解法)
       const I = Iw + (i > 1 ? 0.5 * Ie * ratio * ratio : 0);
       const kk = dt * R * R * Fz[i] * mu * 21.65 / (vr * I);
       let wn = this.w[i] + dt * (Td[i] - R * fxs) / I / (1 + kk);
-      let bt = brk * BRK[i];
+      // ブレーキは「そのタイヤが受け止められる力」までに制限(前輪が先に限界→アンダー寄り。後輪は特に控えめ)
+      const kb = i < 2 ? 0.95 - 0.15 * lat : 0.8 - 0.45 * lat;
+      let bt = Math.min(brk * BRK[i], kb * Fz[i] * mu * R);
       if (this.abs && kap < -0.13) bt *= clamp(1 + (kap + 0.13) * 12, 0.05, 1); // ABS
       const db = dt * bt / Iw;
       this.w[i] = Math.abs(wn) <= db ? 0 : wn - Math.sign(wn) * db;
