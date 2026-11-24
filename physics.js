@@ -8,6 +8,9 @@ const TQ = [[1000, .5], [3000, .8], [5000, .95], [6500, 1], [8000, .98], [9000, 
 const TMAX = 470;                  // 最大トルク[Nm]
 const BRK = [3200, 3200, 1500, 1500]; // ブレーキ最大トルク(左前,右前,左後,右後)。前寄りの配分
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// タイヤ(コンパウンド)の性能。ソフト/ハード等を増やす時は、ここに足してCarのtireを切り替える
+// mu: 基準荷重(4000N)での路面μ / loadExp: 荷重が増えた時にμが下がる度合い(0に近いほど下がりにくい)
+export const TIRES = { medium: { name: 'ミディアム', mu: 1.6, loadExp: -0.04 } };
 function torque(rpm) {
   for (let i = 1; i < TQ.length; i++) {
     if (rpm <= TQ[i][0]) { const [r0, t0] = TQ[i - 1], [r1, t1] = TQ[i]; return t0 + (t1 - t0) * clamp((rpm - r0) / (r1 - r0), 0, 1); }
@@ -17,9 +20,9 @@ function torque(rpm) {
 
 // 向き(yaw)=θのとき、前方=(sinθ, cosθ)、左=(cosθ, -sinθ)  ※three.jsのx,z平面と同じ
 export class Car {
-  constructor() { this.tc = true; this.abs = true; this.reset(0, 0, 0); }
+  constructor() { this.tc = true; this.abs = true; this.tire = TIRES.medium; this.reset(0, 0, 0); }
   reset(x, z, yaw) {
-    Object.assign(this, { x, z, yaw, vx: 0, vy: 0, r: 0, w: [0, 0, 0, 0], gear: 1, rpm: 1500, steer: 0, thr: 0, brk: 0, axf: 0, ayf: 0, shift: 0, slip: [0, 0, 0, 0], kmh: 0 });
+    Object.assign(this, { x, z, yaw, vx: 0, vy: 0, r: 0, w: [0, 0, 0, 0], gear: 1, rpm: 1500, steer: 0, thr: 0, brk: 0, axf: 0, ayf: 0, shift: 0, slip: [0, 0, 0, 0], comb: [0, 0, 0, 0], kmh: 0 });
   }
   // dt:秒 / inp:{steer(-1右〜+1左), thr(0〜1), brk(0〜1)} / grip(x,z):その場所の路面グリップ係数
   step(dt, inp, grip) {
@@ -42,8 +45,8 @@ export class Car {
     if (this.gear === 1 && this.thr > 0.05) rpm = Math.max(rpm, 4200); // 発進時はクラッチが滑る
     this.rpm += (rpm - this.rpm) * Math.min(1, dt * 20);
     let thr = this.thr;
-    const sl = Math.max(this.slip[2], this.slip[3]);
-    if (this.tc && sl > 0.12) thr *= clamp(1 - (sl - 0.12) * 8, 0.1, 1); // トラクションコントロール
+    const cs = Math.max(this.comb[2], this.comb[3]); // 後輪の「前後+横」を合わせた滑り具合(1でグリップの限界)
+    if (this.tc && cs > 0.95) thr *= clamp(1 - (cs - 0.95) * 2.5, 0.1, 1); // トラクションコントロール(コーナー中の横滑りにも効く)
     let Te = torque(rpm) * TMAX * thr - (1 - thr) * TMAX * 0.07 * (1 - 0.6 * lat) * rpm / 9000; // エンジンブレーキ(コーナー中は弱めてリフトオフスピンを防ぐ)
     if ((rpm > 9000 && Te > 0) || this.shift > 0) Te = 0;                    // レブリミッター/変速中
     const Tw = Te * ratio * 0.92;
@@ -66,14 +69,14 @@ export class Car {
       const vwx = this.vx - this.r * py, vwy = this.vy + this.r * px;      // タイヤ接地点の速度
       const vl = vwx * cd + vwy * sd, vt = -vwx * sd + vwy * cd;           // タイヤの向きに変換(前後/横)
       const vr = Math.max(Math.abs(vl), 3);
-      const mu = 1.55 * g * Math.pow(Fz[i] / 3200, -0.1);                  // 荷重が増えるとグリップ係数は少し下がる
+      const mu = this.tire.mu * g * Math.pow(Fz[i] / 4000, this.tire.loadExp); // タイヤのμ × 路面(芝は低い) × 荷重による変化
       const kap = (this.w[i] * R - vl) / vr;                               // スリップ率
       const sx = kap / 0.12, sy = (vt / vr) / 0.12, ss = Math.hypot(sx, sy) + 1e-6; // 12%/約7°でピーク
       const F = Fz[i] * mu * Math.sin(1.5 * Math.atan(1.732 * ss));        // 摩擦円(前後と横の合成)
       const fxs = F * sx / ss;
       const rr = Fz[i] * (g < 0.9 ? 0.07 : 0.015) * Math.tanh(vl * 2);    // 転がり抵抗(芝は大きい)
       const fxt = fxs - rr, fyt = -F * sy / ss * (i > 1 ? 1 + 0.35 * this.brk : 1); // 制動中は後輪の横グリップを強め、アンダー寄り・スピンしにくく
-      this.slip[i] = kap;
+      this.slip[i] = kap; this.comb[i] = ss;
       // ホイールの回転(安定のため陰解法)
       const I = Iw + (i > 1 ? 0.5 * Ie * ratio * ratio : 0);
       const kk = dt * R * R * Fz[i] * mu * 21.65 / (vr * I);
