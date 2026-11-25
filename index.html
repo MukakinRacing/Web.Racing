@@ -21,13 +21,23 @@ button.on{background:#fffb;color:#000}
 #bB{right:calc(156px + env(safe-area-inset-right));background:#c0303099}
 #tools{position:fixed;right:calc(14px + env(safe-area-inset-right));top:calc(10px + env(safe-area-inset-top));display:flex;gap:8px}
 #tools button{padding:8px 12px;border-radius:12px;font-size:15px}
+#bH{left:50%;transform:translateX(-50%);width:96px;height:52px;border-radius:16px;font-size:14px;background:#fff2;opacity:.85}
+#panel{display:none;position:fixed;right:calc(14px + env(safe-area-inset-right));top:calc(58px + env(safe-area-inset-top));background:#000b;border:1px solid #fff5;border-radius:14px;padding:8px 16px;z-index:5;touch-action:manipulation}
+#panel label{display:block;font-size:17px;padding:8px 0;white-space:nowrap}
+#panel input{width:22px;height:22px;vertical-align:middle;margin:0 10px 0 0}
 </style>
 </head>
 <body>
 <div id="hud"><div id="spd">0<small> km/h</small></div><div id="rpm"><div id="rpmb"></div></div><div id="gear">GEAR 1</div><div id="lap"></div></div>
-<div id="tools"><button id="bTC">TC ON</button><button id="bABS">ABS ON</button><button id="bReset">RESET</button></div>
+<div id="tools"><button id="bAs">⚙ アシスト</button><button id="bReset">RESET</button></div>
+<div id="panel">
+<label><input type="checkbox" id="aTC" checked>TCS(トラクションコントロール)</label>
+<label><input type="checkbox" id="aABS" checked>ABS</label>
+<label><input type="checkbox" id="aSTA" checked>ステア補正</label>
+<label><input type="checkbox" id="aESC">横滑り防止(ESC)</label>
+</div>
 <button class="b" id="bL">◀</button><button class="b" id="bR">▶</button>
-<button class="b" id="bB">BRAKE</button><button class="b" id="bG">GAS</button>
+<button class="b" id="bB">BRAKE</button><button class="b" id="bG">GAS</button><button class="b" id="bH">サイド</button>
 <div id="msg">読み込み中…</div>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 <script>
