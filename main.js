@@ -89,27 +89,36 @@ const shadow = new THREE.Mesh(new THREE.PlaneGeometry(3, 6.2).rotateX(-Math.PI /
 shadow.position.y = 0.03; scene.add(shadow);
 
 // ---------- 操作(画面ボタン / キーボード) ----------
-const key = { L: 0, R: 0, G: 0, B: 0 }; let sIn = 0;
+const key = { L: 0, R: 0, G: 0, B: 0, H: 0 }; let sIn = 0, rev = false, lastB = -9; // H=サイドブレーキ / rev=バック中
 const hold = (id, k) => {
   const e = $(id);
   e.addEventListener('pointerdown', ev => { ev.preventDefault(); key[k] = 1; e.classList.add('on'); });
   for (const n of ['pointerup', 'pointercancel', 'pointerleave']) e.addEventListener(n, () => { key[k] = 0; e.classList.remove('on'); });
 };
-hold('bL', 'L'); hold('bR', 'R'); hold('bG', 'G'); hold('bB', 'B');
-const KM = { ArrowLeft: 'L', a: 'L', ArrowRight: 'R', d: 'R', ArrowUp: 'G', w: 'G', ArrowDown: 'B', s: 'B', ' ': 'B' };
-addEventListener('keydown', e => { if (KM[e.key]) key[KM[e.key]] = 1; if (e.key === 'r') resetCar(); });
+hold('bL', 'L'); hold('bR', 'R'); hold('bG', 'G'); hold('bB', 'B'); hold('bH', 'H');
+// ブレーキを2回続けて押す(2回目は押し続ける)と、ほぼ停止している時だけバックできる
+function brakePress() { const now = performance.now(); if (now - lastB < 400 && Math.abs(car.vx) < 2) rev = true; lastB = now; }
+$('bB').addEventListener('pointerdown', brakePress);
+const KM = { ArrowLeft: 'L', a: 'L', ArrowRight: 'R', d: 'R', ArrowUp: 'G', w: 'G', ArrowDown: 'B', s: 'B', ' ': 'B', x: 'H' };
+addEventListener('keydown', e => { if (KM[e.key]) { if (KM[e.key] === 'B' && !e.repeat) brakePress(); key[KM[e.key]] = 1; } if (e.key === 'r') resetCar(); });
 addEventListener('keyup', e => { if (KM[e.key]) key[KM[e.key]] = 0; });
 
 // ---------- 車の状態 ----------
 const car = new Car(); let idx = N - 8, ready = false, simT = 0, lapStart = null, lastLap = 0, bestLap = 0, lapNo = 0;
 function resetCar(atStart) { // 今の位置のコース上(またはスタート位置)に戻す
-  const i = atStart ? N - 8 : idx, p = pts[i], t = track.t[i]; idx = i; sIn = 0;
+  const i = atStart ? N - 8 : idx, p = pts[i], t = track.t[i]; idx = i; sIn = 0; rev = false;
   car.reset(p.x, p.z, Math.atan2(t.x, t.z));
 }
 resetCar(true);
 $('bReset').onclick = () => resetCar();
-$('bTC').onclick = e => { car.tc = !car.tc; e.target.textContent = 'TC ' + (car.tc ? 'ON' : 'OFF'); };
-$('bABS').onclick = e => { car.abs = !car.abs; e.target.textContent = 'ABS ' + (car.abs ? 'ON' : 'OFF'); };
+// アシスト(チェックボックス)。選んだ状態はこの端末に保存される
+const AS = [['aTC', 'tc'], ['aABS', 'abs'], ['aSTA', 'sta'], ['aESC', 'esc']];
+let saved = {}; try { saved = JSON.parse(localStorage.getItem('assist') || '{}'); } catch (e) { }
+for (const [id, k] of AS) {
+  const el = $(id); if (k in saved) el.checked = !!saved[k]; car[k] = el.checked;
+  el.addEventListener('change', () => { car[k] = el.checked; try { const o = {}; for (const [, k2] of AS) o[k2] = car[k2]; localStorage.setItem('assist', JSON.stringify(o)); } catch (e) { } });
+}
+$('bAs').onclick = () => { const p = $('panel'); p.style.display = p.style.display === 'block' ? 'none' : 'block'; };
 
 // ---------- 車モデル(GLB)の読み込みと、タイヤ等の取り付け ----------
 const wheels = []; let carObj;
@@ -166,7 +175,8 @@ loader.load('PorscheGT3Rrexy.glb', g => { try { buildCar(g.scene); } catch (e) {
 // ---------- 毎フレームの処理 ----------
 function physics(dt) {
   simT += dt;
-  car.step(dt, { steer: sIn, thr: key.G, brk: key.B }, (x, z) => { const a = Math.abs(track.near(x, z, idx).off); return a < HW + 0.3 ? 1 : a < HW + 2.2 ? 0.8 : 0.5; }); // 路面→グリップ(芝は低い)
+  if (rev && (!key.B || key.G)) rev = false; // ボタンを離す/アクセルでバック終了
+  car.step(dt, { steer: sIn, thr: rev ? key.B : key.G, brk: rev ? 0 : key.B, hb: key.H, rev }, (x, z) => { const a = Math.abs(track.near(x, z, idx).off); return a < HW + 0.3 ? 1 : a < HW + 2.2 ? 0.8 : 0.5; }); // 路面→グリップ(芝は低い)
   const q = track.near(car.x, car.z, idx), a = Math.abs(q.off), lim = WALL - 1.3;
   if (a > lim) { const t = track.t[q.i], s = q.off > 0 ? -1 : 1; car.bump(t.z * s, -t.x * s, a - lim); } // 壁
   if (idx > N * 0.9 && q.i < N * 0.1) { // スタートラインを通過
@@ -199,16 +209,16 @@ let hudT = 0;
 function hud(dt) {
   hudT += dt; if (hudT < 0.1) return; hudT = 0;
   $('spd').innerHTML = Math.round(Math.abs(car.kmh)) + '<small> km/h</small>';
-  $('gear').textContent = 'GEAR ' + car.gear;
+  $('gear').textContent = 'GEAR ' + (car.gear < 0 ? 'R' : car.gear);
   $('rpmb').style.width = Math.min(100, car.rpm / 90) + '%'; $('rpmb').style.background = car.rpm > 8300 ? '#f44' : '#4fd';
-  $('lap').textContent = (lapNo ? 'LAP ' + lapNo + '  ' + fmt(simT - lapStart) : 'スタートラインまで加速!') + '\nLAST ' + fmt(lastLap) + '   BEST ' + fmt(bestLap);
+  $('lap').textContent = (lapNo ? 'LAP ' + lapNo + '  ' + fmt(simT - lapStart) : 'スタートラインまで加速!') + '\nLAST ' + fmt(lastLap) + '   BEST ' + fmt(bestLap) + (rev ? '\nバック中(ボタンを離すと停止)' : Math.abs(car.kmh) < 2 ? '\nブレーキを2回押す(2回目は押し続ける)とバック' : '');
 }
 const H = 1 / 240; let acc = 0, last = performance.now(), fc = 0, ft = 0, warm = 0;
 function frame(now) {
   requestAnimationFrame(frame);
   const raw = (now - last) / 1000, dt = Math.min(0.05, raw); last = now;
   if (ready) {
-    const tg = key.L - key.R; sIn += (tg - sIn) * Math.min(1, dt * (tg ? 5 : 9)); // ハンドルはゆっくり切って、戻りは速く
+    const tg = key.L - key.R; sIn += (tg - sIn) * Math.min(1, dt * (tg === 0 ? 7 : tg * sIn < 0 ? 5 : 3.2)); // ハンドルはじわっと切って(車の重さ)、戻りは速く
     acc += dt; while (acc >= H) { physics(H); acc -= H; }
     showCar(dt); hud(dt);
     fc++; ft += raw; // 重い時は解像度を自動で下げる(処理落ち対策)
