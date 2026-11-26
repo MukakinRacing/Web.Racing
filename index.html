@@ -21,6 +21,11 @@ button.on{background:#fffb;color:#000}
 #bB{right:calc(156px + env(safe-area-inset-right));background:#c0303099}
 #tools{position:fixed;right:calc(14px + env(safe-area-inset-right));top:calc(10px + env(safe-area-inset-top));display:flex;gap:8px}
 #tools button{padding:8px 12px;border-radius:12px;font-size:15px}
+#swh{position:fixed;left:50%;top:calc(10px + env(safe-area-inset-top));transform:translateX(-50%);text-align:center;pointer-events:none;text-shadow:0 1px 4px #000;font-size:15px}
+#swi{width:50px;height:50px;box-sizing:border-box;border:6px solid #fffd;border-radius:50%;margin:0 auto 2px;position:relative;background:#0003}
+#swi:before{content:"";position:absolute;left:0;right:0;top:50%;height:6px;margin-top:-3px;background:#fffd}
+#swi:after{content:"";position:absolute;left:50%;top:50%;bottom:0;width:6px;margin-left:-3px;background:#fffd}
+#swi i{position:absolute;left:50%;top:-6px;width:6px;height:6px;margin-left:-3px;background:#f44}
 #bH{left:50%;transform:translateX(-50%);width:96px;height:52px;border-radius:16px;font-size:14px;background:#fff2;opacity:.85}
 #panel{display:none;position:fixed;right:calc(14px + env(safe-area-inset-right));top:calc(58px + env(safe-area-inset-top));background:#000b;border:1px solid #fff5;border-radius:14px;padding:8px 16px;z-index:5;touch-action:manipulation}
 #panel label{display:block;font-size:17px;padding:8px 0;white-space:nowrap}
@@ -29,6 +34,7 @@ button.on{background:#fffb;color:#000}
 </head>
 <body>
 <div id="hud"><div id="spd">0<small> km/h</small></div><div id="rpm"><div id="rpmb"></div></div><div id="gear">GEAR 1</div><div id="lap"></div></div>
+<div id="swh"><div id="swi"><i></i></div><div id="swd">0°</div></div>
 <div id="tools"><button id="bAs">⚙ アシスト</button><button id="bReset">RESET</button></div>
 <div id="panel">
 <label><input type="checkbox" id="aTC" checked>TCS(トラクションコントロール)</label>
