@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { Car, Track, CAR } from './physics.js';
+import { Car, Track, CAR, STEER } from './physics.js';
 
 window.__ok = 1;
 const $ = id => document.getElementById(id), msg = $('msg');
@@ -192,7 +192,7 @@ function showCar(dt) {
   shadow.position.x = car.x; shadow.position.z = car.z; shadow.rotation.y = car.yaw;
   wheels.forEach((w, i) => {
     ang[i] = (ang[i] + car.w[i] * dt) % (Math.PI * 2); w.spin.rotation.x = ang[i];
-    if (i < 2) w.piv.rotation.y = car.steer;
+    if (i < 2) w.piv.rotation.y = car.swa[i]; // 前輪は内側のほうが大きく切れる(アッカーマン)
     const fast = Math.abs(car.w[i]) > 60; if (w.blur) w.blur.visible = fast; if (w.rim) w.rim.visible = !fast;
   });
 }
@@ -205,9 +205,12 @@ function showCam(dt) {
   sky.position.copy(cam.position);
 }
 const fmt = t => t ? Math.floor(t / 60) + ':' + (t % 60).toFixed(3).padStart(6, '0') : '-:--.---';
-let hudT = 0;
+let hudT = 0; const swi = $('swi'), swd = $('swd');
 function hud(dt) {
+  const deg = car.steer * 57.2958 * STEER.ratio; // ハンドルの角度(ステアリングレシオ12.5:1)
+  swi.style.transform = 'rotate(' + (-deg).toFixed(1) + 'deg)';
   hudT += dt; if (hudT < 0.1) return; hudT = 0;
+  swd.textContent = Math.round(Math.abs(deg)) + '°' + (deg > 3 ? ' ◀' : deg < -3 ? ' ▶' : '');
   $('spd').innerHTML = Math.round(Math.abs(car.kmh)) + '<small> km/h</small>';
   $('gear').textContent = 'GEAR ' + (car.gear < 0 ? 'R' : car.gear);
   $('rpmb').style.width = Math.min(100, car.rpm / 90) + '%'; $('rpmb').style.background = car.rpm > 8300 ? '#f44' : '#4fd';
@@ -218,7 +221,7 @@ function frame(now) {
   requestAnimationFrame(frame);
   const raw = (now - last) / 1000, dt = Math.min(0.05, raw); last = now;
   if (ready) {
-    const tg = key.L - key.R; sIn += (tg - sIn) * Math.min(1, dt * (tg === 0 ? 7 : tg * sIn < 0 ? 5 : 3.2)); // ハンドルはじわっと切って(車の重さ)、戻りは速く
+    const tg = key.L - key.R; sIn += (tg - sIn) * Math.min(1, dt * (tg === 0 ? 11 : tg * sIn < 0 ? 8 : 5)); // ハンドルを切る/戻す速さ(大きいほど速い)
     acc += dt; while (acc >= H) { physics(H); acc -= H; }
     showCar(dt); hud(dt);
     fc++; ft += raw; // 重い時は解像度を自動で下げる(処理落ち対策)
