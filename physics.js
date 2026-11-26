@@ -17,8 +17,19 @@ export const TIRES = { medium: { name: 'ミディアム', mu: 1.65, loadExp: -0.
 // 挙動の調整つまみ
 //  LTD: 左右の荷重移動のうち前輪が受け持つ割合(大きいほどアンダー寄り) / LTL: 前後の荷重移動の強さ
 //  FG,RG: 前輪/後輪タイヤのグリップ倍率(GT3は後輪が太い) / FSA: 前輪のグリップが最大になる滑り角の倍率(大きいほど前輪がじわっと効く=アンダー寄り)
-//  STA: ステア補正で許す前輪の滑り / BF,BR: ブレーキが使ってよい前輪/後輪の摩擦円の大きさ
-const LTD = 0.56, LTL = 0.8, FG = 1.0, RG = 1.06, FSA = 1.35, STA = 0.16, BF = 1.05, BR = 0.95;
+//  STA: ステア補正で許す前輪の滑り / BF,BR: ブレーキが使ってよい前輪/後輪の摩擦円の大きさ / KX: 前後方向(加速・ブレーキ)のグリップが横方向より強い倍率(スリックタイヤ)
+const LTD = 0.56, LTL = 0.8, FG = 1.0, RG = 1.06, FSA = 1.35, STA = 0.16, BF = 1.05, BR = 0.95, KX = 1.07;
+
+// ステアリング: ratio=ステアリングレシオ(ハンドル角:タイヤ角) / maxDeg=センター基準の最大切れ角 / ackermann=アッカーマン率(内側のタイヤほど大きく切れる度合い)
+// → 全切り時: センター29° / 内側タイヤ約32.6° / 外側タイヤ約26.1° / ハンドルは約362°(1回転ちょっと)
+export const STEER = { ratio: 12.5, maxDeg: 29, ackermann: 0.8 };
+const STEER_MAX = STEER.maxDeg * Math.PI / 180;
+function ackermann(d, out) { // センター角dから、左右の前輪それぞれの角度を計算(out[0]=左前, out[1]=右前)
+  if (Math.abs(d) < 1e-6) { out[0] = out[1] = d; return; }
+  const k = STEER.ackermann * CAR.tf / (2 * CAR.L), cot = 1 / Math.tan(Math.abs(d)), sg = Math.sign(d);
+  const inn = Math.atan(1 / (cot - k)) * sg, outer = Math.atan(1 / (cot + k)) * sg;
+  if (d > 0) { out[0] = inn; out[1] = outer; } else { out[0] = outer; out[1] = inn; }
+}
 function torque(rpm) {
   for (let i = 1; i < TQ.length; i++) {
     if (rpm <= TQ[i][0]) { const [r0, t0] = TQ[i - 1], [r1, t1] = TQ[i]; return t0 + (t1 - t0) * clamp((rpm - r0) / (r1 - r0), 0, 1); }
@@ -35,7 +46,7 @@ export class Car {
   }
   reset(x, z, yaw) {
     Object.assign(this, { x, z, yaw, vx: 0, vy: 0, r: 0, w: [0, 0, 0, 0], gear: 1, rpm: 1500, steer: 0, thr: 0, brk: 0, hb: 0,
-      axf: 0, ayf: 0, axl: 0, ayl: 0, shift: 0, slip: [0, 0, 0, 0], comb: [0, 0, 0, 0], sa: [0, 0, 0, 0], muw: [1.6, 1.6, 1.6, 1.6], escAct: 0, kmh: 0 });
+      axf: 0, ayf: 0, axl: 0, ayl: 0, shift: 0, slip: [0, 0, 0, 0], comb: [0, 0, 0, 0], sa: [0, 0, 0, 0], muw: [1.6, 1.6, 1.6, 1.6], swa: [0, 0], escAct: 0, kmh: 0 });
   }
   // dt:秒 / inp:{steer(-1右〜+1左), thr(0〜1), brk(0〜1), hb(サイドブレーキ0〜1), rev(バック中ならtrue)}
   // grip(x,z):その場所の路面グリップ係数
@@ -43,12 +54,12 @@ export class Car {
     const { m, a, b, L, h, R, Iw, Iz, Ie } = CAR, s = Math.sin(this.yaw), c = Math.cos(this.yaw);
     const sp = Math.hypot(this.vx, this.vy), rev = !!inp.rev;
     this.thr += (inp.thr - this.thr) * Math.min(1, dt * 8);
-    this.brk += (inp.brk - this.brk) * Math.min(1, dt * (inp.brk > this.brk ? 4 : 12)); // 踏む時はじわっと、離す時は素早く
+    this.brk += (inp.brk - this.brk) * Math.min(1, dt * (inp.brk > this.brk ? 8 : 12)); // 踏む時はすぐ効き始め、離す時は素早く
     this.hb += ((inp.hb || 0) - this.hb) * Math.min(1, dt * 12);
     // ハンドルの角度(速度が上がるほど小さく)
-    let st = inp.steer * 0.52 / (1 + (sp / 14) ** 2);
-    if (this.sta && this.vx > 4) { const dv = Math.atan2(this.vy + a * this.r, this.vx); st = clamp(st, Math.min(dv - STA, 0), Math.max(dv + STA, 0)); } // ステア補正: 前輪が滑りすぎない角度まで(切る向きは変えない)
-    this.steer = st;
+    let st = inp.steer * STEER_MAX / (1 + (sp / 14) ** 2);
+    if (this.sta && this.vx > 8) { const dv = Math.atan2(this.vy + a * this.r, this.vx); st = clamp(st, Math.min(dv - STA, 0), Math.max(dv + STA, 0)); } // ステア補正: 前輪が滑りすぎない角度まで(切る向きは変えない)
+    this.steer = st; ackermann(st, this.swa);
     // アクセルを離している間: 停止中はブレーキ保持、後ろに転がっている時は自動でブレーキ(バックから止まれる)
     const brk = (inp.thr < 0.02 && (Math.abs(this.vx) < 1 || this.vx < -1)) ? Math.max(this.brk, this.vx < -1 ? 0.5 : 0.2) : this.brk;
     const lat = Math.min(1, Math.abs(this.ayf) / 14.7); // 横Gの大きさ(1.5Gで1)
@@ -86,18 +97,18 @@ export class Car {
     // 前輪は少しだけ超える(=適度なアンダー)、後輪は余裕を残す(=スピンしない)
     const lus = [0, 1, 2, 3].map(i => Math.sin(SC * Math.atan(SB * Math.abs(this.sa[i])))); // 横の滑りだけで使うグリップの割合(狙っている旋回の大きさ)
     const ayReq = this.vx > 0 ? Math.min(1.5, this.vx * this.vx * Math.abs(Math.tan(this.steer)) / L / G) : 0; // ハンドルから予想される横G(旋回の強さ)
-    const bscale = this.abs ? 1 - 0.72 * ayReq / 1.5 : 1; // ABS(コーナリング対応): 旋回中はブレーキの強さも自動で弱める(最大で7割減)
+    const bscale = this.abs ? 1 - 0.8 * ayReq / 1.5 : 1; // ABS(コーナリング対応): 旋回中はブレーキの強さも自動で弱める(最大で8割減)
     const cap = [0, 1, 2, 3].map(i => {
       const lu = lus[i];
-      const kb = i < 2 ? Math.min(0.95, Math.sqrt(Math.max(0, BF * BF - lu * lu))) : Math.min(0.8, Math.sqrt(Math.max(0, BR * BR - lu * lu)));
-      return kb * Fz[i] * this.muw[i] * R;
+      const kb = i < 2 ? Math.min(0.99, Math.sqrt(Math.max(0, BF * BF - lu * lu))) : Math.min(0.9, Math.sqrt(Math.max(0, BR * BR - lu * lu)));
+      return kb * Fz[i] * this.muw[i] * R * KX;
     });
     const capA = [(cap[0] + cap[1]) / 2, (cap[0] + cap[1]) / 2, (cap[2] + cap[3]) / 2, (cap[2] + cap[3]) / 2];
     // --- タイヤ4本ごとの力 ---
     const P = [[a, CAR.tf / 2], [a, -CAR.tf / 2], [-b, CAR.tr / 2], [-b, -CAR.tr / 2]]; // 重心から見た位置(前方,左)
     let Fx = 0, Fy = 0, Mz = 0;
     for (let i = 0; i < 4; i++) {
-      const [px, py] = P[i], d = i < 2 ? this.steer : 0, cd = Math.cos(d), sd = Math.sin(d);
+      const [px, py] = P[i], d = i < 2 ? this.swa[i] : 0, cd = Math.cos(d), sd = Math.sin(d);
       const g = grip(this.x + px * s + py * c, this.z + px * c - py * s);
       const vwx = this.vx - this.r * py, vwy = this.vy + this.r * px;      // タイヤ接地点の速度
       const vl = vwx * cd + vwy * sd, vt = -vwx * sd + vwy * cd;           // タイヤの向きに変換(前後/横)
@@ -107,13 +118,13 @@ export class Car {
       this.sa[i] += ((vt / vr) / (SA * (i < 2 ? FSA : 1) * Math.pow(Fz[i] / 4000, 0.1)) - this.sa[i]) * Math.min(1, dt * vr / 0.3); // 横の滑りは少し遅れて効く(タイヤの緩和長0.3m=重量感)
       const sx = kap / SK, sy = this.sa[i], ss = Math.hypot(sx, sy) + 1e-6;
       const F = Fz[i] * mu * Math.sin(SC * Math.atan(SB * ss));            // 摩擦円(前後と横の合成)
-      const fxs = F * sx / ss;
+      const fxs = F * sx / ss * KX;
       const rr = Fz[i] * (g < 0.9 ? 0.07 : 0.015) * Math.tanh(vl * 2);    // 転がり抵抗(芝は大きい)
       const fxt = fxs - rr, fyt = -F * sy / ss;
       this.slip[i] = kap; this.comb[i] = ss;
       // ホイールの回転(安定のため陰解法)
       const I = Iw + (i > 1 ? 0.5 * Ie * ratio * ratio : 0);
-      const kk = dt * R * R * Fz[i] * mu * SLOPE / (vr * I);
+      const kk = dt * R * R * Fz[i] * mu * SLOPE * KX / (vr * I);
       const wn = this.w[i] + dt * (Td[i] - R * fxs) / I / (1 + kk);
       this.muw[i] = mu;
       let bt = Math.min(brk * BRK[i] * bscale, capA[i]);
